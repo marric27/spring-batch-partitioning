@@ -24,6 +24,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 import com.batch.parallel.entities.User;
 import com.batch.parallel.partitioner.CustomPartitioner;
@@ -40,6 +42,15 @@ public class BatchConfig {
 
     @Value("${batch.chunk.size}")
     private int chunkSize;
+
+    @Value("${batch.pool.core-size}")
+    private int poolCoreSize;
+
+    @Value("${batch.pool.max-size}")
+    private int poolMaxSize;
+
+    @Value("${batch.pool.queue-capacity}")
+    private int poolQueueCapacity;
 
     @Bean
     public Job partitionedJob(JobRepository jobRepository, Step partitionStep) {
@@ -66,6 +77,18 @@ public class BatchConfig {
     }
 
     @Bean
+    public TaskExecutor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(poolCoreSize);
+        executor.setMaxPoolSize(poolMaxSize);
+        executor.setQueueCapacity(poolQueueCapacity);
+        executor.setThreadNamePrefix("batch-thread-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean
     public Step workerStep(JobRepository jobRepository, PlatformTransactionManager transactionManager,
             ItemReader<User> reader,
             ItemProcessor<User, User> processor,
@@ -82,7 +105,7 @@ public class BatchConfig {
     public PartitionHandler partitionHandler(Step workerStep) throws Exception {
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
         handler.setStep(workerStep);
-        handler.setTaskExecutor(new SimpleAsyncTaskExecutor("partition-worker-"));
+        handler.setTaskExecutor(taskExecutor());
         handler.setGridSize(gridSize);
         handler.afterPropertiesSet();
         return handler;

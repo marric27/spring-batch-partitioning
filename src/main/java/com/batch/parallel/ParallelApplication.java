@@ -7,7 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class ParallelApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(ParallelApplication.class, args);
+		System.exit(
+				SpringApplication.exit(
+						SpringApplication.run(ParallelApplication.class, args)));
 	}
 
 }
