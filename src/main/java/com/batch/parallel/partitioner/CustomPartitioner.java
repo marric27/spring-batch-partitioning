@@ -1,45 +1,42 @@
 package com.batch.parallel.partitioner;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.ExecutionContext;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 
 public class CustomPartitioner implements Partitioner {
 
-    private static final Resource INPUT_RESOURCE = new ClassPathResource("people-10000.csv");
+    private static final String DEFAULT_FILE_NAME = "people-10000.csv";
+
+    private final Resource resource;
+
+    public CustomPartitioner(Resource resource) {
+        this.resource = resource;
+    }
 
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
-        Map<String, ExecutionContext> partitions = new HashMap<>();
-        int totalLines = countLines();
+        Map<String, ExecutionContext> result = new HashMap<>();
+        int totalItems = countItems();
+        int targetSize = Math.max(1, (int) Math.ceil((double) totalItems / gridSize));
 
-        if (totalLines == 0) {
-            ExecutionContext context = new ExecutionContext();
-            context.putInt("startLine", 1);
-            context.putInt("endLine", 0);
-            partitions.put("partition0", context);
-            return partitions;
-        }
-
-        int targetSize = (int) Math.ceil((double) totalLines / gridSize);
+        int startItem = 0;
         int partitionNumber = 0;
-
-        for (int startLine = 1; startLine <= totalLines; startLine += targetSize) {
-            int endLine = Math.min(startLine + targetSize - 1, totalLines);
+        while (startItem < totalItems) {
+            int endItem = Math.min(startItem + targetSize, totalItems);
             ExecutionContext context = new ExecutionContext();
+            context.putString("fileName", DEFAULT_FILE_NAME);
             context.putInt("partitionNumber", partitionNumber);
-            context.putInt("startLine", startLine);
-            context.putInt("endLine", endLine);
-            partitions.put("partition" + partitionNumber, context);
+            context.putInt("startItem", startItem);
+            context.putInt("endItem", endItem);
+            result.put("partition" + partitionNumber, context);
+            startItem = endItem;
             partitionNumber++;
         }
 
@@ -52,6 +49,16 @@ public class CustomPartitioner implements Partitioner {
             return (int) reader.lines().count();
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to count lines for partitioning", exception);
+        }
+    }
+
+    private int countItems() {
+        try {
+            try (var lines = Files.lines(resource.getFile().toPath())) {
+                return Math.toIntExact(Math.max(0, lines.skip(1).count()));
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to count items for partitioning", exception);
         }
     }
 }
