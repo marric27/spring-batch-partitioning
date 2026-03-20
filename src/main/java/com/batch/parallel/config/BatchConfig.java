@@ -18,9 +18,12 @@ import org.springframework.batch.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
+import org.springframework.batch.core.configuration.annotation.StepScope;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -43,7 +46,7 @@ public class BatchConfig {
     public Step partitionStep(JobRepository jobRepository, Step workerStep, Partitioner partitioner,
             PartitionHandler partitionHandler) {
         return new StepBuilder("partitionStep", jobRepository)
-                .partitioner("workerStep", partitioner) // Il nome deve corrispondere al bean dello step "lavoratore"
+                .partitioner("workerStep", partitioner)
                 .step(workerStep)
                 .partitionHandler(partitionHandler)
                 .build();
@@ -51,7 +54,7 @@ public class BatchConfig {
 
     @Bean
     public Partitioner partitioner() {
-        return new CustomPartitioner();
+        return new CustomPartitioner(new ClassPathResource("people-10000.csv"));
     }
 
     @Bean
@@ -71,16 +74,25 @@ public class BatchConfig {
     public PartitionHandler partitionHandler(Step workerStep) {
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
         handler.setStep(workerStep);
-        handler.setTaskExecutor(new SimpleAsyncTaskExecutor()); // Abilita il parallelismo
-        handler.setGridSize(4); // Numero di partizioni da gestire contemporaneamente
+        handler.setTaskExecutor(new SimpleAsyncTaskExecutor());
+        handler.setGridSize(4);
         return handler;
     }
 
     @Bean
-    public FlatFileItemReader<User> reader() {
+    @StepScope
+    public FlatFileItemReader<User> reader(
+            @Value("#{stepExecutionContext['fileName']}") String fileName,
+            @Value("#{stepExecutionContext['startItem']}") Integer startItem,
+            @Value("#{stepExecutionContext['endItem']}") Integer endItem) {
+        Resource resource = new ClassPathResource(fileName);
+
         return new FlatFileItemReaderBuilder<User>()
                 .name("userItemReader")
-                .resource(new ClassPathResource("people-10000.csv"))
+                .resource(resource)
+                .linesToSkip(1)
+                .currentItemCount(startItem)
+                .maxItemCount(endItem)
                 .delimited()
                 .names("index", "userId", "firstName", "lastName", "sex", "email", "phone", "dateOfBirth", "jobTitle")
                 .targetType(User.class)
