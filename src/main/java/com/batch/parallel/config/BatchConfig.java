@@ -1,7 +1,6 @@
 package com.batch.parallel.config;
 
 import javax.sql.DataSource;
-
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
@@ -26,13 +25,14 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
-
 import com.batch.parallel.entities.User;
 import com.batch.parallel.partitioner.CustomPartitioner;
 import com.batch.parallel.processor.UserItemProcessor;
 
 @Configuration
 public class BatchConfig {
+
+    private static final int GRID_SIZE = 4;
 
     @Bean
     public Job partitionedJob(JobRepository jobRepository, Step partitionStep) {
@@ -49,6 +49,7 @@ public class BatchConfig {
                 .partitioner("workerStep", partitioner)
                 .step(workerStep)
                 .partitionHandler(partitionHandler)
+                .gridSize(GRID_SIZE)
                 .build();
     }
 
@@ -71,11 +72,12 @@ public class BatchConfig {
     }
 
     @Bean
-    public PartitionHandler partitionHandler(Step workerStep) {
+    public PartitionHandler partitionHandler(Step workerStep) throws Exception {
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
         handler.setStep(workerStep);
-        handler.setTaskExecutor(new SimpleAsyncTaskExecutor());
-        handler.setGridSize(4);
+        handler.setTaskExecutor(new SimpleAsyncTaskExecutor("partition-worker-"));
+        handler.setGridSize(GRID_SIZE);
+        handler.afterPropertiesSet();
         return handler;
     }
 
@@ -100,8 +102,9 @@ public class BatchConfig {
     }
 
     @Bean
-    public UserItemProcessor processor() {
-        return new UserItemProcessor();
+    @StepScope
+    public UserItemProcessor processor(@Value("#{stepExecutionContext['partitionNumber']}") Integer partitionNumber) {
+        return new UserItemProcessor(partitionNumber);
     }
 
     @Bean

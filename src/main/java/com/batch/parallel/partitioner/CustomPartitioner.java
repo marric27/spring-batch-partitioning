@@ -40,7 +40,16 @@ public class CustomPartitioner implements Partitioner {
             partitionNumber++;
         }
 
-        return result;
+        return partitions;
+    }
+
+    private int countLines() {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(INPUT_RESOURCE.getInputStream(), StandardCharsets.UTF_8))) {
+            return (int) reader.lines().count();
+        } catch (IOException exception) {
+            throw new UncheckedIOException("Unable to count lines for partitioning", exception);
+        }
     }
 
     private int countItems() {
