@@ -18,6 +18,8 @@ import org.springframework.batch.item.database.JdbcBatchItemWriter;
 import org.springframework.batch.item.database.builder.JdbcBatchItemWriterBuilder;
 import org.springframework.batch.item.file.FlatFileItemReader;
 import org.springframework.batch.item.file.builder.FlatFileItemReaderBuilder;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
@@ -88,8 +90,9 @@ public class BatchConfig {
     }
 
     @Bean
-    public UserItemProcessor processor() {
-        return new UserItemProcessor();
+    @StepScope
+    public UserItemProcessor processor(@Value("#{stepExecutionContext['partitionNumber']}") Integer partitionNumber) {
+        return new UserItemProcessor(partitionNumber);
     }
 
     @Bean
