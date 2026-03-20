@@ -32,11 +32,11 @@ public class UserItemProcessor implements ItemProcessor<User, User> {
                 .jobTitle(user.getJobTitle())
                 .build();
 
-        log.info(
-                "Processing user firstName={} on thread={} partitionNumber={}",
-                userUpperCase.getFirstName(),
-                threadName,
-                partitionNumber);
+        // log.info(
+        //         "Processing user firstName={} on thread={} partitionNumber={}",
+        //         userUpperCase.getFirstName(),
+        //         threadName,
+        //         partitionNumber);
 
         return userUpperCase;
     }
