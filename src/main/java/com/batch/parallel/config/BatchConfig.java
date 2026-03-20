@@ -32,7 +32,14 @@ import com.batch.parallel.processor.UserItemProcessor;
 @Configuration
 public class BatchConfig {
 
-    private static final int GRID_SIZE = 4;
+    @Value("${batch.input.file.name}")
+    private String inputFileName;
+
+    @Value("${batch.grid.size}")
+    private int gridSize;
+
+    @Value("${batch.chunk.size}")
+    private int chunkSize;
 
     @Bean
     public Job partitionedJob(JobRepository jobRepository, Step partitionStep) {
@@ -49,13 +56,13 @@ public class BatchConfig {
                 .partitioner("workerStep", partitioner)
                 .step(workerStep)
                 .partitionHandler(partitionHandler)
-                .gridSize(GRID_SIZE)
+                .gridSize(gridSize)
                 .build();
     }
 
     @Bean
     public Partitioner partitioner() {
-        return new CustomPartitioner(new ClassPathResource("people-10000.csv"));
+        return new CustomPartitioner(new ClassPathResource(inputFileName));
     }
 
     @Bean
@@ -64,7 +71,7 @@ public class BatchConfig {
             ItemProcessor<User, User> processor,
             ItemWriter<User> writer) {
         return new StepBuilder("workerStep", jobRepository)
-                .<User, User>chunk(10, transactionManager)
+                .<User, User>chunk(chunkSize, transactionManager)
                 .reader(reader)
                 .processor(processor)
                 .writer(writer)
@@ -76,7 +83,7 @@ public class BatchConfig {
         TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
         handler.setStep(workerStep);
         handler.setTaskExecutor(new SimpleAsyncTaskExecutor("partition-worker-"));
-        handler.setGridSize(GRID_SIZE);
+        handler.setGridSize(gridSize);
         handler.afterPropertiesSet();
         return handler;
     }
@@ -92,7 +99,7 @@ public class BatchConfig {
         return new FlatFileItemReaderBuilder<User>()
                 .name("userItemReader")
                 .resource(resource)
-                .linesToSkip(1)
+                // .linesToSkip(1)
                 .currentItemCount(startItem)
                 .maxItemCount(endItem)
                 .delimited()

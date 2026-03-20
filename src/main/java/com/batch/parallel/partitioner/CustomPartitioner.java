@@ -10,11 +10,16 @@ import java.util.Map;
 
 import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.item.ExecutionContext;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class CustomPartitioner implements Partitioner {
 
-    private static final String DEFAULT_FILE_NAME = "people-10000.csv";
+    @Value("${batch.input.file.lines}")
+    private int lines;
 
     private final Resource resource;
 
@@ -25,11 +30,11 @@ public class CustomPartitioner implements Partitioner {
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
         Map<String, ExecutionContext> partitions = new HashMap<>();
-        int totalItems = countItems();
+        int totalItems = lines;
 
         if (totalItems == 0) {
             ExecutionContext context = new ExecutionContext();
-            context.putString("fileName", DEFAULT_FILE_NAME);
+            context.putString("fileName", resource.getFilename());
             context.putInt("partitionNumber", 0);
             context.putInt("startItem", 0);
             context.putInt("endItem", 0);
@@ -44,24 +49,20 @@ public class CustomPartitioner implements Partitioner {
         while (startItem < totalItems) {
             int endItem = Math.min(startItem + targetSize, totalItems);
             ExecutionContext context = new ExecutionContext();
-            context.putString("fileName", DEFAULT_FILE_NAME);
+            context.putString("fileName", resource.getFilename());
             context.putInt("partitionNumber", partitionNumber);
             context.putInt("startItem", startItem);
             context.putInt("endItem", endItem);
+
+
+            log.info(String.format(">>> [PARTITIONER] Creata Partition %d: startItem=%d, endItem=%d (Size=%d)", 
+                partitionNumber, startItem, endItem, (endItem - startItem)));
+
             partitions.put("partition" + partitionNumber, context);
             startItem = endItem;
             partitionNumber++;
         }
 
         return partitions;
-    }
-
-    private int countItems() {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
-            return Math.toIntExact(Math.max(0, reader.lines().skip(1).count()));
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to count items for partitioning", exception);
-        }
     }
 }
