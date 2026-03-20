@@ -1,8 +1,10 @@
 package com.batch.parallel.partitioner;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -22,12 +24,23 @@ public class CustomPartitioner implements Partitioner {
 
     @Override
     public Map<String, ExecutionContext> partition(int gridSize) {
-        Map<String, ExecutionContext> result = new HashMap<>();
+        Map<String, ExecutionContext> partitions = new HashMap<>();
         int totalItems = countItems();
-        int targetSize = Math.max(1, (int) Math.ceil((double) totalItems / gridSize));
 
+        if (totalItems == 0) {
+            ExecutionContext context = new ExecutionContext();
+            context.putString("fileName", DEFAULT_FILE_NAME);
+            context.putInt("partitionNumber", 0);
+            context.putInt("startItem", 0);
+            context.putInt("endItem", 0);
+            partitions.put("partition0", context);
+            return partitions;
+        }
+
+        int targetSize = Math.max(1, (int) Math.ceil((double) totalItems / gridSize));
         int startItem = 0;
         int partitionNumber = 0;
+
         while (startItem < totalItems) {
             int endItem = Math.min(startItem + targetSize, totalItems);
             ExecutionContext context = new ExecutionContext();
@@ -35,7 +48,7 @@ public class CustomPartitioner implements Partitioner {
             context.putInt("partitionNumber", partitionNumber);
             context.putInt("startItem", startItem);
             context.putInt("endItem", endItem);
-            result.put("partition" + partitionNumber, context);
+            partitions.put("partition" + partitionNumber, context);
             startItem = endItem;
             partitionNumber++;
         }
@@ -43,20 +56,10 @@ public class CustomPartitioner implements Partitioner {
         return partitions;
     }
 
-    private int countLines() {
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(INPUT_RESOURCE.getInputStream(), StandardCharsets.UTF_8))) {
-            return (int) reader.lines().count();
-        } catch (IOException exception) {
-            throw new UncheckedIOException("Unable to count lines for partitioning", exception);
-        }
-    }
-
     private int countItems() {
-        try {
-            try (var lines = Files.lines(resource.getFile().toPath())) {
-                return Math.toIntExact(Math.max(0, lines.skip(1).count()));
-            }
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
+            return Math.toIntExact(Math.max(0, reader.lines().skip(1).count()));
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to count items for partitioning", exception);
         }
