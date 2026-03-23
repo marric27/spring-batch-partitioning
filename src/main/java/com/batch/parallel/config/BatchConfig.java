@@ -1,8 +1,12 @@
 package com.batch.parallel.config;
 
 import javax.sql.DataSource;
+
+import org.springframework.batch.core.ExitStatus;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
+import org.springframework.batch.core.StepExecution;
+import org.springframework.batch.core.StepExecutionListener;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.partition.PartitionHandler;
@@ -10,6 +14,8 @@ import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.core.partition.support.TaskExecutorPartitionHandler;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.integration.async.AsyncItemProcessor;
+import org.springframework.batch.integration.async.AsyncItemWriter;
 import org.springframework.batch.item.ItemProcessor;
 import org.springframework.batch.item.ItemReader;
 import org.springframework.batch.item.ItemWriter;
@@ -52,27 +58,11 @@ public class BatchConfig {
     private int poolQueueCapacity;
 
     @Bean
-    public Job partitionedJob(JobRepository jobRepository, Step partitionStep) {
-        return new JobBuilder("partitionedJob", jobRepository)
+    public Job asyncJob(JobRepository jobRepository, Step workerStep) {
+        return new JobBuilder("asyncJob", jobRepository)
                 .incrementer(new RunIdIncrementer())
-                .start(partitionStep)
+                .start(workerStep) // Non c've più il partitionStep
                 .build();
-    }
-
-    @Bean
-    public Step partitionStep(JobRepository jobRepository, Step workerStep, Partitioner partitioner,
-            PartitionHandler partitionHandler) {
-        return new StepBuilder("partitionStep", jobRepository)
-                .partitioner("workerStep", partitioner)
-                .step(workerStep)
-                .partitionHandler(partitionHandler)
-                .gridSize(gridSize)
-                .build();
-    }
-
-    @Bean
-    public Partitioner partitioner() {
-        return new CustomPartitioner(new ClassPathResource(inputFileName));
     }
 
     @Bean
@@ -88,62 +78,80 @@ public class BatchConfig {
     }
 
     @Bean
-    public Step workerStep(JobRepository jobRepository, PlatformTransactionManager transactionManager,
+    public Step workerStep(JobRepository jobRepository,
+            PlatformTransactionManager transactionManager,
             ItemReader<User> reader,
-            ItemProcessor<User, User> processor,
-            ItemWriter<User> writer) {
-        return new StepBuilder("workerStep", jobRepository)
-                .<User, User>chunk(chunkSize, transactionManager)
+            AsyncItemProcessor<User, User> asyncProcessor,
+            AsyncItemWriter<User> asyncWriter) {
+        return new StepBuilder("workerStep", jobRepository).<User, java.util.concurrent.Future<User>>chunk(chunkSize,
+                transactionManager)
                 .reader(reader)
-                .processor(processor)
-                .writer(writer)
+                .processor(asyncProcessor)
+                .writer(asyncWriter)
+                // .taskExecutor(taskExecutor())
+                .listener(new StepExecutionListener() {
+                    @Override
+                    public void beforeStep(StepExecution stepExecution) {
+                        // puoi lanciare thread indipendenti
+                        new Thread(() -> {
+                            while (true) {
+                                System.out.println("Azione in background...");
+                                try {
+                                    Thread.sleep(1000);
+                                } catch (InterruptedException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        }).start();
+                    }
+
+                    @Override
+                    public ExitStatus afterStep(StepExecution stepExecution) {
+                        return null;
+                    }
+                })
                 .build();
     }
 
     @Bean
-    public PartitionHandler partitionHandler(Step workerStep) throws Exception {
-        TaskExecutorPartitionHandler handler = new TaskExecutorPartitionHandler();
-        handler.setStep(workerStep);
-        handler.setTaskExecutor(taskExecutor());
-        handler.setGridSize(gridSize);
-        handler.afterPropertiesSet();
-        return handler;
-    }
-
-    @Bean
-    @StepScope
-    public FlatFileItemReader<User> reader(
-            @Value("#{stepExecutionContext['fileName']}") String fileName,
-            @Value("#{stepExecutionContext['startItem']}") Integer startItem,
-            @Value("#{stepExecutionContext['endItem']}") Integer endItem) {
-        Resource resource = new ClassPathResource(fileName);
-
-        return new FlatFileItemReaderBuilder<User>()
-                .name("userItemReader")
-                .resource(resource)
-                // .linesToSkip(1)
-                .currentItemCount(startItem)
-                .maxItemCount(endItem)
-                .delimited()
-                .names("index", "userId", "firstName", "lastName", "sex", "email", "phone", "dateOfBirth", "jobTitle")
-                .targetType(User.class)
-                .build();
-    }
-
-    @Bean
-    @StepScope
-    public UserItemProcessor processor(@Value("#{stepExecutionContext['partitionNumber']}") Integer partitionNumber) {
-        return new UserItemProcessor(partitionNumber);
-    }
-
-    @Bean
-    public JdbcBatchItemWriter<User> writer(DataSource dataSource) {
+    public JdbcBatchItemWriter<User> databaseWriter(DataSource dataSource) {
         return new JdbcBatchItemWriterBuilder<User>()
                 .dataSource(dataSource)
                 .sql("INSERT INTO users (user_id, first_name, last_name, sex, email, phone, date_of_birth, job_title) "
-                        +
-                        "VALUES (:userId, :firstName, :lastName, :sex, :email, :phone, :dateOfBirth, :jobTitle)")
+                        + "VALUES (:userId, :firstName, :lastName, :sex, :email, :phone, :dateOfBirth, :jobTitle)")
                 .beanMapped()
+                .build();
+    }
+
+    @Bean
+    public UserItemProcessor delegateProcessor() {
+        return new UserItemProcessor();
+    }
+
+    @Bean
+    public AsyncItemProcessor<User, User> asyncProcessor(UserItemProcessor delegateProcessor) {
+        AsyncItemProcessor<User, User> asyncProcessor = new AsyncItemProcessor<>();
+        asyncProcessor.setDelegate(delegateProcessor);
+        asyncProcessor.setTaskExecutor(taskExecutor()); // Usa il pool di thread
+        return asyncProcessor;
+    }
+
+    @Bean
+    public AsyncItemWriter<User> asyncWriter(JdbcBatchItemWriter<User> delegateWriter) {
+        AsyncItemWriter<User> asyncWriter = new AsyncItemWriter<>();
+        asyncWriter.setDelegate(delegateWriter);
+        return asyncWriter;
+    }
+
+    // Il Reader torna normale (senza StepScope o parametri di partizione)
+    @Bean
+    public FlatFileItemReader<User> reader() {
+        return new FlatFileItemReaderBuilder<User>()
+                .name("userItemReader")
+                .resource(new ClassPathResource(inputFileName))
+                .delimited()
+                .names("index", "userId", "firstName", "lastName", "sex", "email", "phone", "dateOfBirth", "jobTitle")
+                .targetType(User.class)
                 .build();
     }
 
